@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { unauthenticated } from "@/lib/pos/http";
+import { errorResponse, unauthenticated } from "@/lib/pos/http";
 import { resetDemo } from "@/lib/pos/store";
 import { parseApp } from "@/lib/roles";
 import { getActor } from "@/lib/session";
@@ -10,6 +10,10 @@ export async function POST(_request: Request, { params }: { params: Promise<{ ap
   if (app !== "admin") return unauthenticated();
   const actor = await getActor(app);
   if (actor?.role !== "admin") return unauthenticated();
-  resetDemo();
-  return NextResponse.json({ ok: true });
+  try {
+    resetDemo();
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    return errorResponse(error);
+  }
 }

@@ -23,6 +23,8 @@ function secret() {
 
 const encoder = new TextEncoder();
 
+const fromBase64url = (text: string) => Uint8Array.from(atob(text.replaceAll("-", "+").replaceAll("_", "/")), (char) => char.charCodeAt(0));
+
 const base64url = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes)).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 
 async function key() {
@@ -40,8 +42,8 @@ async function verify(token: string | undefined, purpose: Purpose, now: number):
   const [body, signature] = token.split(".");
   if (!body || !signature) return null;
   try {
-    const expected = new Uint8Array(await crypto.subtle.sign("HMAC", await key(), encoder.encode(body)));
-    if (base64url(expected) !== signature) return null;
+    // verify() compares in constant time, so the signature cannot be worked out by timing guesses.
+    if (!(await crypto.subtle.verify("HMAC", await key(), fromBase64url(signature), encoder.encode(body)))) return null;
     const claims = JSON.parse(atob(body.replaceAll("-", "+").replaceAll("_", "/"))) as Claims;
     if (claims.p !== purpose || claims.exp < now) return null;
     return claims;

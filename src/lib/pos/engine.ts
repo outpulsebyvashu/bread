@@ -1,11 +1,12 @@
 // The POS rules. Every write goes through dispatch(), which checks the actor's role,
 // applies the command to a copy (so a failure changes nothing) and writes the audit log.
 // These commands are the specification for the Postgres RPCs at the Supabase step.
-import type { AppId, Role } from "../roles/index.ts";
+import { ROLES, type AppId, type Role } from "../roles/index.ts";
 import { financialYear, istDate, priceLines, allocate, type PriceInput } from "./money.ts";
 import { dayReport } from "./report.ts";
 import { isMobileNumber, normalizePhone } from "../format/index.ts";
-import { DEMO_NIRO_OTP, hashPin } from "./seed.ts";
+import { hashPin, isLegacyPinHash, randomToken, verifyPin } from "./pin.ts";
+import { DEMO_NIRO_OTP } from "./seed.ts";
 import type {
   Actor,
   Approvalish,
@@ -102,7 +103,7 @@ function approve(
     const pin = text(approval?.pin);
     if (!pin) fail("Manager PIN needed", "pin_required");
     approver = state.staff.find(
-      (row) => row.active && (row.role === "manager" || row.role === "admin") && row.pinHash === hashPin(pin),
+      (row) => row.active && (row.role === "manager" || row.role === "admin") && verifyPin(row.pinHash, pin),
     );
     if (!approver) {
       // Counted outside the rolled-back copy by dispatch().
@@ -284,6 +285,7 @@ function newCheck(state: PosState, actor: Actor, now: number, tableId: string | 
     discountBy: "",
     niroRewardRef: "",
     niroRewardId: "",
+    niroRewardCost: 0,
     niroMemberId: "",
     businessDate: state.businessDate,
     cancelledReason: "",
@@ -293,6 +295,19 @@ function newCheck(state: PosState, actor: Actor, now: number, tableId: string | 
 }
 
 const lineCounts = (line: Line) => line.status !== "void";
+
+// Points are taken when a reward is applied, before anyone has paid. If the discount is removed or replaced
+// while it is still waiting on the check, the member gets those points back.
+function releaseReward(state: PosState, check: Check) {
+  if (check.niroRewardId && check.discountP > 0) {
+    const member = state.niroMembers.find((row) => row.id === check.niroMemberId);
+    const cost = check.niroRewardCost ?? state.niroRewards.find((row) => row.id === check.niroRewardId)?.cost ?? 0;
+    if (member) member.points += cost;
+  }
+  check.niroRewardId = "";
+  check.niroRewardRef = "";
+  check.niroRewardCost = 0;
+}
 const kitchenOutstanding = (line: Line) => ["awaiting", "held", "new", "preparing", "ready"].includes(line.status);
 
 // A check closes once everything chargeable is billed and paid and nothing is still on its way.
@@ -657,6 +672,13 @@ function command<A>(roles: Role[] | "public", run: (ctx: Ctx, args: A) => unknow
 
 const QR_NIRO_PENDING_MS = 15 * 60_000;
 
+// Niro's real sign-in code check is not connected yet. Until it is, the fixed demo code works only while
+// demo mode is on, so a live shop can never accept "123456" from anyone who has read the source.
+function requireNiroCode(state: PosState, otp: unknown) {
+  if (!state.settings.demoMode) fail("Niro sign-in is not switched on yet.", "niro_unavailable");
+  if (text(otp) !== DEMO_NIRO_OTP) fail("That code is not right");
+}
+
 // The outlet's code in customer ordering addresses: /api/orders/{outlet-code}/{table-code}.
 // It is the Niro outlet code when one is set, otherwise "main".
 export const outletCode = (state: PosState) => state.settings.niroOutletCode.trim().toLowerCase() || "main";
@@ -821,11 +843,10 @@ const COMMANDS: Record<string, Command> = {
     if (!Number.isInteger(args.amountP) || args.amountP < 0) fail("Enter a valid discount");
     if (args.amountP > subtotal) fail("The discount is more than the bill");
     if (args.amountP === 0) {
+      releaseReward(state, check);
       check.discountP = 0;
       check.discountReason = "";
       check.discountBy = "";
-      check.niroRewardRef = "";
-      check.niroRewardId = "";
       return;
     }
     const cap = Math.floor((subtotal * state.settings.maxCashierDiscountPct) / 100);
@@ -845,11 +866,10 @@ const COMMANDS: Record<string, Command> = {
     } else {
       reason = approve(state, actor, now, "discount", "discount", args.approval, args.amountP, String(check.no));
     }
+    releaseReward(state, check);
     check.discountP = args.amountP;
     check.discountReason = reason;
     check.discountBy = actor.name;
-    check.niroRewardRef = "";
-    check.niroRewardId = "";
   }),
 
   // ----- Kitchen -----
@@ -1139,7 +1159,7 @@ const COMMANDS: Record<string, Command> = {
       if (actor.role !== "manager" && actor.role !== "admin") {
         const pin = text(approval.pin);
         if (!pin) fail("Manager PIN needed", "pin_required");
-        const approver = state.staff.find((row) => row.active && (row.role === "manager" || row.role === "admin") && row.pinHash === hashPin(pin));
+        const approver = state.staff.find((row) => row.active && (row.role === "manager" || row.role === "admin") && verifyPin(row.pinHash, pin));
         if (!approver) throw new PosError("Wrong PIN", "pin_wrong");
         shift.approvedBy = approver.name;
       } else {
@@ -1210,10 +1230,32 @@ const COMMANDS: Record<string, Command> = {
 
   // ----- Admin (tax, price and setup are admin-only) -----
   update_settings: command(ADMIN, ({ state }, args: { patch: Partial<PosState["settings"]> }) => {
-    const patch = args.patch ?? {};
+    const raw = (args.patch ?? {}) as Record<string, unknown>;
+    const patch: Partial<PosState["settings"]> = {};
+    // Only known settings, each with the right kind of value. Anything else is ignored, never stored.
+    for (const [key, kind] of SETTING_KINDS) {
+      if (!(key in raw)) continue;
+      const value = raw[key];
+      if (kind === "text") {
+        if (typeof value !== "string") fail("Check the settings and try again");
+        (patch as Record<string, unknown>)[key] = (value as string).trim().slice(0, 200);
+      } else if (kind === "bool") {
+        if (typeof value !== "boolean") fail("Check the settings and try again");
+        (patch as Record<string, unknown>)[key] = value;
+      } else {
+        if (typeof value !== "number" || !Number.isFinite(value) || value < 0) fail("Check the settings and try again");
+        (patch as Record<string, unknown>)[key] = value;
+      }
+    }
+    if (patch.taxMode !== undefined && !["regular", "composition"].includes(patch.taxMode)) fail("Choose a tax mode");
+    if (patch.qrMode !== undefined && !["accept_first", "auto"].includes(patch.qrMode)) fail("Choose how QR orders are handled");
     if (patch.gstin && !GSTIN_PATTERN.test(patch.gstin.toUpperCase())) fail("That GSTIN does not look valid");
     if (patch.fssai && !/^[0-9]{14}$/.test(patch.fssai)) fail("The FSSAI number must have 14 digits");
-    if (patch.maxCashierDiscountPct !== undefined && (patch.maxCashierDiscountPct < 0 || patch.maxCashierDiscountPct > 100)) fail("Discount limit must be 0 to 100");
+    if (patch.maxCashierDiscountPct !== undefined && patch.maxCashierDiscountPct > 100) fail("Discount limit must be 0 to 100");
+    if (patch.niroOutletCode && !/^[a-z0-9][a-z0-9-]{0,39}$/i.test(patch.niroOutletCode)) fail("The outlet code can only use letters, numbers and dashes");
+    for (const key of ["varianceThresholdP", "niroPointsPer100"] as const) {
+      if (patch[key] !== undefined && !Number.isInteger(patch[key])) fail("Check the settings and try again");
+    }
     if (patch.taxMode && patch.taxMode !== state.settings.taxMode) {
       const fy = financialYear(state.businessDate);
       if (state.bills.some((bill) => bill.fy === fy)) fail("Tax mode is fixed once this financial year has bills");
@@ -1285,6 +1327,7 @@ const COMMANDS: Record<string, Command> = {
   upsert_staff: command(ADMIN, ({ state }, args: { id?: string; name: string; phone?: string; role: Role; active?: boolean; pin?: string; canSettle?: boolean }) => {
     const name = text(args.name);
     if (!name) fail("Enter a name");
+    if (!ROLES.includes(args.role)) fail("Choose a role");
     const phone = args.phone === undefined ? undefined : normalizePhone(args.phone);
     if (phone !== undefined && !isMobileNumber(phone)) fail("Enter a 10-digit mobile number");
     if (phone && state.staff.some((entry) => entry.phone === phone && entry.id !== args.id)) fail("That phone number belongs to someone else");
@@ -1300,6 +1343,8 @@ const COMMANDS: Record<string, Command> = {
       if (!pin) fail("Set a PIN for new staff");
       state.staff.push({ id: nextId(state, "st"), name, phone: phone ?? "", role: args.role, active: true, canSettle: !!args.canSettle, pinHash: hashPin(pin) });
     }
+    // The owner must never be able to lock everyone out, including by changing their own role.
+    if (!state.staff.some((entry) => entry.active && entry.role === "admin")) fail("There must always be one active owner");
   }),
   upsert_table: command(ADMIN, ({ state }, args: { id?: string; label: string; active?: boolean }) => {
     const label = text(args.label);
@@ -1311,12 +1356,12 @@ const COMMANDS: Record<string, Command> = {
       Object.assign(row, { label, active: args.active ?? row.active });
     } else {
       const id = nextId(state, "tb");
-      state.tables.push({ id, label, active: true, qrToken: hashPin(`table-${id}`).slice(0, 12) });
+      state.tables.push({ id, label, active: true, qrToken: randomToken() });
     }
   }),
   rotate_table_qr: command(ADMIN, ({ state, now }, args: { id: string }) => {
     const row = state.tables.find((entry) => entry.id === args.id) ?? fail("Table not found");
-    row.qrToken = hashPin(`table-${row.id}-${now}`).slice(0, 12);
+    row.qrToken = randomToken();
   }),
   set_niro_down: command(ADMIN, ({ state }, args: { down: boolean }) => {
     state.niroDown = !!args.down;
@@ -1353,7 +1398,8 @@ const COMMANDS: Record<string, Command> = {
   niro_redeem: command(TILL, ({ state, actor }, args: { checkId: string; rewardId: string; otp: string }) => {
     const check = openCheck(state, args.checkId);
     if (!check.niroMemberId) fail("Attach a Niro member first");
-    if (text(args.otp) !== DEMO_NIRO_OTP) fail("That code is not right");
+    requireNiroCode(state, args.otp);
+    if (check.niroRewardId && check.discountP > 0) fail("A reward is already applied. Remove the discount before using another.", "reward_applied");
     const reward = state.niroRewards.find((row) => row.id === args.rewardId) ?? fail("Reward not found");
     const member = state.niroMembers.find((row) => row.id === check.niroMemberId) ?? fail("Member not found");
     if (member.points < reward.cost) fail("Not enough points");
@@ -1363,6 +1409,7 @@ const COMMANDS: Record<string, Command> = {
     check.discountReason = `Niro: ${reward.name}`;
     check.discountBy = actor.name;
     check.niroRewardId = reward.id;
+    check.niroRewardCost = reward.cost;
     check.niroRewardRef = `mock_${check.no}_${reward.id}`;
   }),
 
@@ -1455,7 +1502,7 @@ const COMMANDS: Record<string, Command> = {
   // The member is verified here on the server after OTP. A client-supplied member ID is never trusted.
   qr_niro_signin: command("public", ({ state, now }, args: { token: string; phone: string; otp: string; loyalty: boolean; offers: boolean }) => {
     const table = tableByToken(state, args.token);
-    if (text(args.otp) !== DEMO_NIRO_OTP) fail("That code is not right");
+    requireNiroCode(state, args.otp);
     const member = state.niroMembers.find((row) => row.phone === text(args.phone)) ?? fail("No Niro member with that phone");
     if (!args.loyalty) fail("Tick loyalty to earn points on this order");
     const add = (purpose: "loyalty" | "offers") => {
@@ -1469,6 +1516,23 @@ const COMMANDS: Record<string, Command> = {
     return { name: member.name, points: member.points };
   }),
 };
+
+const SETTING_KINDS: [keyof PosState["settings"], "text" | "bool" | "number"][] = [
+  ["shopName", "text"],
+  ["legalName", "text"],
+  ["address", "text"],
+  ["gstin", "text"],
+  ["fssai", "text"],
+  ["taxMode", "text"],
+  ["pricesInclusive", "bool"],
+  ["roundOff", "bool"],
+  ["maxCashierDiscountPct", "number"],
+  ["varianceThresholdP", "number"],
+  ["qrMode", "text"],
+  ["niroPointsPer100", "number"],
+  ["niroOutletCode", "text"],
+  ["demoMode", "bool"],
+];
 
 const SETTLE_COMMANDS = new Set(["issue_bills", "reprint_bill", "pay_cash", "pay_card", "upi_create", "upi_close", "upi_provider_event", "upi_mark_received"]);
 
@@ -1567,6 +1631,7 @@ export function actorForStaff(state: PosState, staffId: string): Actor | null {
 }
 
 const LOGIN_LOCK_MS = 60_000;
+const DUMMY_PIN_HASH = hashPin("000000", "no-such-person");
 const LOGIN_LOG_LIMIT = 1000;
 
 // Checks a phone number and PIN for one app. Every attempt is logged, and repeated failures lock that number briefly.
@@ -1586,7 +1651,9 @@ export function attemptLogin(state: PosState, phone: string, pin: string, app: A
     log(false, "locked");
     throw new PosError("Too many wrong attempts. Wait a minute and try again.", "pin_locked");
   }
-  if (!staff || staff.pinHash !== hashPin(pin)) {
+  // The check runs even for an unknown number, so the time taken does not reveal which numbers are staff.
+  const pinOk = verifyPin(staff?.pinHash ?? DUMMY_PIN_HASH, String(pin));
+  if (!staff || !pinOk) {
     const fails = (lock?.fails ?? 0) + 1;
     state.loginLocks[key] = fails >= 5 ? { fails: 0, until: now + LOGIN_LOCK_MS } : { fails, until: 0 };
     log(false, staff ? "wrong pin" : "unknown number");
@@ -1597,6 +1664,7 @@ export function attemptLogin(state: PosState, phone: string, pin: string, app: A
     throw new PosError("Your role cannot sign in to this app", "forbidden");
   }
   delete state.loginLocks[key];
+  if (isLegacyPinHash(staff.pinHash)) staff.pinHash = hashPin(String(pin));
   log(true, "signed in");
   return staff;
 }

@@ -5,6 +5,7 @@ import { CommandError } from "@/lib/client";
 import type { Approvalish } from "@/lib/pos/types";
 import type { Role } from "@/lib/roles";
 import { Button, ErrorText, Field, Sheet } from "./ui";
+import { DEMO_DEPLOYMENT } from "@/lib/demo";
 
 // Reason list plus, for anyone below manager, a manager PIN right here on their own session.
 export function ApprovalSheet({
@@ -80,7 +81,7 @@ export function ApprovalSheet({
             autoComplete="off"
             value={pin}
             onChange={(event) => setPin(event.target.value)}
-            hint="Demo manager PIN: 1234"
+            hint={DEMO_DEPLOYMENT ? "Demo manager PIN: 1234" : undefined}
           />
         )}
         <ErrorText>{error}</ErrorText>

@@ -11,6 +11,7 @@ import type { AppId, Role } from "@/lib/roles";
 import { ApprovalSheet } from "./ApprovalSheet";
 import { BillDoc, PrintNow } from "./PrintDocs";
 import { Button, Chip, ErrorText, Field, Segmented, Sheet } from "./ui";
+import { DEMO_DEPLOYMENT } from "@/lib/demo";
 
 const money = (paise: number) => formatRupees(paise / 100);
 
@@ -563,7 +564,7 @@ export function CheckoutPanel({ app, check, reasons, role, rewards, canDiscount,
               )}
               {check.niroMember && (
                 <>
-                  <Field label="Customer's OTP to redeem" inputMode="numeric" value={otp} onChange={(event) => setOtp(event.target.value)} hint="Demo OTP: 123456" />
+                  <Field label="Customer's OTP to redeem" inputMode="numeric" value={otp} onChange={(event) => setOtp(event.target.value)} hint={DEMO_DEPLOYMENT ? "Demo OTP: 123456" : undefined} />
                   <div className="flex flex-wrap gap-2">
                     {rewards.filter((reward) => reward.cost <= (check.niroMember?.points ?? 0)).map((reward) => (
                       <Button key={reward.id} variant="soft" className="bg-card" disabled={!otp} onClick={() => act(() => sendCommand(app, "niro_redeem", { checkId: check.id, rewardId: reward.id, otp })).then(onDone)}>

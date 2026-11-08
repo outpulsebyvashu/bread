@@ -1,9 +1,10 @@
 import "server-only";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { DEMO_DEPLOYMENT } from "../demo";
 import { createDemoState } from "./demo";
-import { dispatch, drainNiroOutbox } from "./engine";
-import { DEMO_STAFF_PHONES } from "./seed";
+import { dispatch, drainNiroOutbox, PosError } from "./engine";
+import { createLiveState, DEMO_STAFF_PHONES } from "./seed";
 import type { Actor, PosState } from "./types";
 
 // Local stand-in for the database: one state object, saved to a gitignored file.
@@ -11,6 +12,12 @@ import type { Actor, PosState } from "./types";
 const DIR = join(process.cwd(), ".data");
 const FILE = join(DIR, "breadpos.json");
 const NIRO_RETRY_MS = 20_000;
+
+// A demo build starts with the sample outlet. A live build starts with one owner, from OWNER_PHONE and OWNER_PIN.
+function freshState(now: number): PosState {
+  if (DEMO_DEPLOYMENT) return createDemoState(now);
+  return createLiveState(now, process.env.OWNER_PHONE ?? "", process.env.OWNER_PIN ?? "");
+}
 
 type Holder = { state?: PosState; lastDrain: number };
 const holder = ((globalThis as { __breadpos?: Holder }).__breadpos ??= { lastDrain: 0 });
@@ -24,11 +31,11 @@ function save(state: PosState) {
 
 export function readState(): PosState {
   if (!holder.state) {
-    holder.state = existsSync(FILE) ? (JSON.parse(readFileSync(FILE, "utf8")) as PosState) : createDemoState(Date.now());
+    holder.state = existsSync(FILE) ? (JSON.parse(readFileSync(FILE, "utf8")) as PosState) : freshState(Date.now());
     if (!existsSync(FILE)) save(holder.state);
     // Saved demo data from before phone sign-in.
     for (const staff of holder.state.staff) staff.phone ??= DEMO_STAFF_PHONES[staff.id] ?? "";
-    holder.state.settings.demoMode ??= true;
+    holder.state.settings.demoMode ??= DEMO_DEPLOYMENT;
   }
   return holder.state;
 }
@@ -60,6 +67,8 @@ export function tickOutbox(now: number) {
 }
 
 export function resetDemo() {
+  // Only the sample outlet may be wiped. A shop with real bills must never be reset from a button.
+  if (!readState().settings.demoMode) throw new PosError("Reset is only for the demo outlet", "forbidden");
   holder.state = createDemoState(Date.now());
   save(holder.state);
 }

@@ -1,11 +1,18 @@
 // Demo outlet: menu, tables, stock and staff. All of it is sample data.
-import { createHash } from "node:crypto";
+import { isMobileNumber, normalizePhone } from "../format/index.ts";
 import { istDate } from "./money.ts";
+import { hashPin as saltedHash, randomToken } from "./pin.ts";
 import type { Item, Modifier, ModifierGroup, PosState, RecipeRow } from "./types.ts";
 
-export function hashPin(pin: string) {
-  return createHash("sha256").update(`breadpos-demo:${pin}`).digest("hex");
-}
+// Demo accounts are public by design, so their salt is fixed per person. That lets the hash be computed
+// once per process instead of on every fresh sample outlet.
+const demoHashes = new Map<string, string>();
+const hashPin = (staffId: string, pin: string) => {
+  const key = `${staffId}:${pin}`;
+  let hash = demoHashes.get(key);
+  if (!hash) demoHashes.set(key, (hash = saltedHash(pin, `demo-${staffId}`)));
+  return hash;
+};
 
 export const DEMO_MANAGER_PIN = "1234";
 export const DEMO_ADMIN_PIN = "0000";
@@ -127,7 +134,7 @@ export function createSeedState(now: number): PosState {
     tables: Array.from({ length: 14 }, (_, index) => ({
       id: `T${index + 1}`,
       label: `T${index + 1}`,
-      qrToken: createHash("sha256").update(`table-T${index + 1}`).digest("hex").slice(0, 12),
+      qrToken: randomToken(),
       active: true,
     })),
     categories: [
@@ -151,12 +158,12 @@ export function createSeedState(now: number): PosState {
     recipes,
     stockMoves: [],
     staff: [
-      { id: "s_captain", phone: DEMO_STAFF_PHONES.s_captain, name: "Asha", role: "captain", active: true, canSettle: true, pinHash: hashPin("1111") },
-      { id: "s_captain2", phone: DEMO_STAFF_PHONES.s_captain2, name: "Rohan", role: "captain", active: true, canSettle: false, pinHash: hashPin("1112") },
-      { id: "s_kitchen", phone: DEMO_STAFF_PHONES.s_kitchen, name: "Ravi", role: "kitchen", active: true, canSettle: false, pinHash: hashPin("2222") },
-      { id: "s_cashier", phone: DEMO_STAFF_PHONES.s_cashier, name: "Meera", role: "cashier", active: true, canSettle: true, pinHash: hashPin("3333") },
-      { id: "s_manager", phone: DEMO_STAFF_PHONES.s_manager, name: "Dev (manager)", role: "manager", active: true, canSettle: true, pinHash: hashPin(DEMO_MANAGER_PIN) },
-      { id: "s_admin", phone: DEMO_STAFF_PHONES.s_admin, name: "Owner", role: "admin", active: true, canSettle: true, pinHash: hashPin(DEMO_ADMIN_PIN) },
+      { id: "s_captain", phone: DEMO_STAFF_PHONES.s_captain, name: "Asha", role: "captain", active: true, canSettle: true, pinHash: hashPin("s_captain", "1111") },
+      { id: "s_captain2", phone: DEMO_STAFF_PHONES.s_captain2, name: "Rohan", role: "captain", active: true, canSettle: false, pinHash: hashPin("s_captain2", "1112") },
+      { id: "s_kitchen", phone: DEMO_STAFF_PHONES.s_kitchen, name: "Ravi", role: "kitchen", active: true, canSettle: false, pinHash: hashPin("s_kitchen", "2222") },
+      { id: "s_cashier", phone: DEMO_STAFF_PHONES.s_cashier, name: "Meera", role: "cashier", active: true, canSettle: true, pinHash: hashPin("s_cashier", "3333") },
+      { id: "s_manager", phone: DEMO_STAFF_PHONES.s_manager, name: "Dev (manager)", role: "manager", active: true, canSettle: true, pinHash: hashPin("s_manager", DEMO_MANAGER_PIN) },
+      { id: "s_admin", phone: DEMO_STAFF_PHONES.s_admin, name: "Owner", role: "admin", active: true, canSettle: true, pinHash: hashPin("s_admin", DEMO_ADMIN_PIN) },
     ],
     checks: [],
     kots: [],
@@ -196,4 +203,21 @@ export function createSeedState(now: number): PosState {
     logins: [],
     loginLocks: {},
   };
+}
+
+// A shop that is going live: the sample menu to edit, one owner account, and nothing else.
+// Sample staff, sample Niro members and the simulated payments are all left out.
+export function createLiveState(now: number, ownerPhone: string, ownerPin: string): PosState {
+  const phone = normalizePhone(ownerPhone);
+  if (!isMobileNumber(phone)) throw new Error("OWNER_PHONE must be a 10-digit mobile number");
+  if (!/^[0-9]{4,6}$/.test(ownerPin)) throw new Error("OWNER_PIN must be 4 to 6 digits");
+  const state = createSeedState(now);
+  state.settings.demoMode = false;
+  state.settings.shopName = "My Cafe";
+  state.settings.legalName = "";
+  state.settings.address = "";
+  state.staff = [{ id: "s_owner", phone, name: "Owner", role: "admin", active: true, canSettle: true, pinHash: saltedHash(ownerPin) }];
+  state.niroMembers = [];
+  state.niroRewards = [];
+  return state;
 }

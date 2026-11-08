@@ -9,6 +9,7 @@ import { formatRupees } from "@/lib/format";
 import type { QrView } from "@/lib/pos/views";
 import { OrderPad } from "../OrderPad";
 import { Button, Card, Chip, ErrorText, Field, Loading, Sheet } from "../ui";
+import { DEMO_DEPLOYMENT } from "@/lib/demo";
 
 const STEPS: Record<string, { label: string; className: string }> = {
   awaiting: { label: "Waiting for staff to confirm", className: "bg-pink" },
@@ -32,7 +33,7 @@ function NiroSheet({ base, onClose, onDone }: { base: string; onClose: () => voi
       <div className="flex flex-col gap-3">
         <p className="text-sm text-muted">Optional. You can order without it. Niro is in demo mode here.</p>
         <Field label="Phone number" inputMode="tel" autoComplete="tel" value={phone} onChange={(event) => setPhone(event.target.value)} hint="Demo member: 9000000001" />
-        {sent && <Field label="One-time code" inputMode="numeric" autoComplete="one-time-code" value={otp} onChange={(event) => setOtp(event.target.value)} hint="Demo code: 123456" />}
+        {sent && <Field label="One-time code" inputMode="numeric" autoComplete="one-time-code" value={otp} onChange={(event) => setOtp(event.target.value)} hint={DEMO_DEPLOYMENT ? "Demo code: 123456" : undefined} />}
         <fieldset className="flex flex-col gap-2 text-sm">
           <legend className="mb-1 font-medium">Choose what your number is used for</legend>
           <label className="flex min-h-11 items-center gap-3">

@@ -9,21 +9,14 @@ import { isMobileNumber, normalizePhone } from "@/lib/format";
 import { APP_INFO, landingApp, parseApp, type Role } from "@/lib/roles";
 import { ErrorText, Field } from "./ui";
 
-// Demo hints only. These go away with the demo store at the Supabase stage.
-const DEMO_ACCOUNTS: { name: string; role: Role; phone: string; pin: string }[] = [
-  { name: "Meera", role: "cashier", phone: "9800000031", pin: "3333" },
-  { name: "Asha", role: "captain", phone: "9800000011", pin: "1111" },
-  { name: "Rohan", role: "captain", phone: "9800000012", pin: "1112" },
-  { name: "Ravi", role: "kitchen", phone: "9800000021", pin: "2222" },
-  { name: "Dev", role: "manager", phone: "9800000041", pin: "1234" },
-  { name: "Owner", role: "admin", phone: "9800000051", pin: "0000" },
-];
+export type DemoAccount = { name: string; role: Role; phone: string; pin: string };
 const FILLS = ["bg-pink", "bg-mustard", "bg-olive", "bg-lilac", "bg-periwinkle", "bg-lime"];
 const MIN_PIN = 4;
 const MAX_PIN = 6;
 
 // The one sign-in for every app. Where someone lands depends on who they are.
-export function LoginScreen() {
+// `demoAccounts` is empty in a live build, and then the sample sign-ins are not shown at all.
+export function LoginScreen({ demoAccounts = [] }: { demoAccounts?: DemoAccount[] }) {
   const params = useSearchParams();
   const requested = parseApp(params.get("app") ?? "");
   const next = params.get("next");
@@ -131,10 +124,11 @@ export function LoginScreen() {
         <p className="text-center text-xs text-muted">Forgot your PIN? Ask the owner to reset it.</p>
       </section>
 
+      {demoAccounts.length > 0 && (
       <section aria-label="Demo accounts">
         <h2 className="mb-2 text-sm font-medium">Demo accounts <span className="font-normal text-muted">Tap one to fill the number</span></h2>
         <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {DEMO_ACCOUNTS.map((row, index) => (
+          {demoAccounts.map((row, index) => (
             <li key={row.phone}>
               <button
                 type="button"
@@ -152,6 +146,7 @@ export function LoginScreen() {
           ))}
         </ul>
       </section>
+      )}
       <Link href="/" className="inline-flex min-h-11 items-center self-start text-sm text-muted underline">All apps</Link>
     </main>
   );

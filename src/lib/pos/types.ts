@@ -121,6 +121,8 @@ export type Check = {
   discountBy: string;
   niroRewardRef: string;
   niroRewardId: string;
+  // Points taken for the applied reward, kept so they can be returned even if the reward is later deleted.
+  niroRewardCost?: number;
   niroMemberId: string;
   businessDate: string;
   cancelledReason: string;

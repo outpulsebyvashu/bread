@@ -1,6 +1,6 @@
 # breadPOS — instructions for Claude Code
 
-You are taking over this project. The architecture is designed; the app code is not written yet. Start from `docs/ROADMAP.md` phase 1.
+You are taking over this project. The apps and the POS engine (`src/lib/pos/engine.ts`) are built and tested as a single-process demo. Read `docs/AUDIT.md` first: it lists what was fixed on 8 Nov 2026 and what is still open (storage is the blocker).
 
 ## What this is
 A realtime restaurant/cafe POS (PWA) for Vashudev's F&B ventures (bread/cafe brands, The Dough Theory, etc.), with direct integration to **Niro.Cards** (his loyalty platform). Roles: customer (QR), captain, kitchen, cashier, manager, admin.
