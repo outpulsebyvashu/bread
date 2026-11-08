@@ -34,8 +34,15 @@ Next.js App Router + TypeScript + Tailwind, Supabase (Postgres/Auth/Realtime), C
 - Ask before: changing the stack, adding paid services, or changing money/permission logic.
 - Niro API details are unconfirmed: use the mock adapter and flag it; do not invent real endpoints.
 
-## Commands (once scaffolded)
-Document dev/build/test/deploy commands here as they are created.
+## Commands
+- `npm run dev`: dev server at http://localhost:3000
+- `npm run app`: dev server at http://localhost:6001 (6000 is reserved for X11; Next.js and browsers refuse it)
+- `npm run bread`: same as `npm run app`
+- `npm run build`: production build
+- `npm run lint`: ESLint
+- `npm test`: engine unit tests
+
+Test and deploy commands: add here as they are created.
 
 ## Definition of done per feature
 Works on a phone viewport, enforced by RLS for the right roles only (test as anon and as each role), realtime updates without refresh, no secrets in client code.

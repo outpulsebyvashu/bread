@@ -1,0 +1,102 @@
+@import "tailwindcss";
+
+/* Design tokens */
+:root {
+  /* Neutrals */
+  --canvas: #f2f2ed;
+  --card: #ffffff;
+  --ink: #111111;
+  --muted: #65655f;
+  --hairline: #e4e4dc;
+
+  /* Accent: black text only, never white on lime */
+  --lime: #d6f23a;
+
+  /* Pastels for categories and status: at most 4-5 per screen */
+  --lilac: #d9cff7;
+  --pink: #f7c9d8;
+  --mustard: #f2cf63;
+  --olive: #c9d29a;
+  --periwinkle: #c5d0f7;
+
+  /* Shape */
+  --radius-card: 28px;
+  --radius-pill: 999px;
+
+  /* Motion */
+  --ease-soft: 180ms ease;
+}
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-card: var(--card);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-hairline: var(--hairline);
+  --color-lime: var(--lime);
+  --color-lilac: var(--lilac);
+  --color-pink: var(--pink);
+  --color-mustard: var(--mustard);
+  --color-olive: var(--olive);
+  --color-periwinkle: var(--periwinkle);
+  --radius-card: var(--radius-card);
+  --radius-pill: var(--radius-pill);
+  --font-sans: var(--font-jakarta);
+}
+
+body {
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-sans), system-ui, sans-serif;
+}
+
+:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* Gentle press feedback on anything tappable */
+.tap {
+  transition:
+    transform var(--ease-soft),
+    background-color var(--ease-soft),
+    color var(--ease-soft);
+}
+
+.tap:active {
+  transform: scale(0.97);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tap {
+    transition: none;
+  }
+
+  .tap:active {
+    transform: none;
+  }
+}
+
+/* 80 mm thermal print area for KOTs and receipts */
+@media print {
+  @page {
+    size: 80mm auto;
+    margin: 0;
+  }
+
+  body * {
+    visibility: hidden;
+  }
+
+  .print-area,
+  .print-area * {
+    visibility: visible;
+  }
+
+  .print-area {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 80mm;
+  }
+}

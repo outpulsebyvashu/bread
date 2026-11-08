@@ -12,6 +12,24 @@ Restaurant/cafe POS as an installable web app (PWA), realtime across devices, ro
 | Realtime | Supabase Realtime on `orders`, `order_items`, `items`, `ingredients` | Live sync, KDS alerts |
 
 ## Surfaces (routes) and who may open them
+
+Six staff apps and the customer app, each with its own session cookie, web manifest and icon. There is **one login** for all of them.
+
+| Domain | Serves |
+|---|---|
+| `auth.niro.cards` | The one login (`/login`), phone number + PIN |
+| `bread.niro.cards` | POS (`/pos`), Kitchen (`/kds`), Manager (`/manager`), Items (`/items`) |
+| `workforce.niro.cards` | Captain (`/captain`) |
+| `admin.outpulse.company` | POS Admin (`/admin`), which can also run every other app from its "Run the shop" tab |
+| `niro.cards` | Customer ordering: page `/o/{outlet-code}/{table-code}`, API `/api/orders/{outlet-code}/{table-code}` |
+
+Set the `*_ORIGIN` variables in `.env.example` to turn this on. With none set, everything runs on one address.
+
+**How sign-in moves between domains.** An app with no session sends the person to `auth.niro.cards/login?app=<app>`. After the phone and PIN check, the login domain remembers the sign-in (its own cookie) and redirects to `<app domain>/auth/callback?token=...` with a signed pass that works once and for 60 seconds. The app domain swaps it for its own session cookie and lands on the app's home. People go to the app they asked for if their role allows it, otherwise to their own role's app (cashier to POS, kitchen to Kitchen, captain to Captain, manager to Manager, owner to Admin). Browsers cannot share cookies between `niro.cards` and `outpulse.company`, which is why a redirect pass is used. Signing out of one app also ends the login-domain sign-in, but other apps' sessions last until they expire (12 hours) or the person is deactivated, which takes effect at once.
+
+**Before going live with separate servers:** the demo store is one process, so all domains must be served by it. Separate deployments need the shared database (Supabase stage), including for the one-time pass list, and the same `SESSION_SECRET` everywhere.
+
+
 | Route | Role | Purpose |
 |---|---|---|
 | `/o/[outlet]/[table]` | public (anon) | Customer QR ordering + tracking, optional Niro sign-in |

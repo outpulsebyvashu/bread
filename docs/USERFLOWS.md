@@ -1,5 +1,10 @@
 # breadPOS — User flows by role
 
+## Staff sign-in
+One login page for everything (`auth.niro.cards/login`). Staff enter their phone number and PIN and are sent to the right app for their role: cashier to POS, kitchen to Kitchen, captain to Captain, manager to Manager, owner to POS Admin. Opening an app while signed out sends you to the login and back. Managers and the owner can move between the apps their role allows without typing the PIN again. Wrong details get one general error, and a number locks for a minute after five failures. A forgotten PIN is reset by the owner in Staff.
+
+Apps: POS (`bread.niro.cards`, cashiers), Kitchen, Manager and Items (same domain), Captain (`workforce.niro.cards`), POS Admin (`admin.outpulse.company`, owner, can run all the others from "Run the shop"). Customers use `niro.cards` with no sign-in.
+
 ## Customer (QR, no login required)
 1. Scan table QR → `/o/[outlet]/[table]`.
 2. Optional: "Sign in with Niro" (phone + OTP) → see points and available rewards.
